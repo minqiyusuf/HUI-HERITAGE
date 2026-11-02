@@ -90,7 +90,9 @@ export async function saveAdminCatalog(input: AdminCatalogInput, submitter?: Wor
     : undefined;
   const workflow = isSubmission && submitter ? { submittedByUserId: submitter.userId, submittedByLane: null, reviewedByUserId: null, reviewerLane: null, reviewComment: null, reviewedAt: null } : !input.id && submitter ? { submittedByUserId: submitter.userId, submittedByLane: null } : {};
   if (input.id && previousStatus === "APPROVED") await ensureCatalogReviewBaseline(input.type, input.id);
-  const common = { title: input.title, description: input.description, source: input.source, keywords: input.keywords ?? [], status: input.status ?? "DRAFT", ...workflow };
+  // This is the sole write path for the digitisation catalogue. Holding
+  // imports never set this marker, even if an imported record has images.
+  const common = { title: input.title, description: input.description, source: input.source, keywords: input.keywords ?? [], status: input.status ?? "DRAFT", isDigitalHeritage: true, ...workflow };
   if (input.type === "manuscript") {
     const data = { ...common, language: input.language, author: input.author, dynasty: input.dynasty, versionType: input.versionType };
     const book = input.id ? await prisma.book.update({ where: { id: input.id }, data }) : await prisma.book.create({ data });

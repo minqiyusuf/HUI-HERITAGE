@@ -34,19 +34,10 @@ type DatabaseRecord = {
   media: { id: string; storageKey: string; mimeType: string; visibility: "PUBLIC" | "MEMBER_ONLY" | "PRIVATE" }[];
 };
 
-/**
- * 图书馆检索导入的是书目与馆藏分布，不是平台已数字化的内容。
- * 它们只能出现在 /holdings，绝不能进入 /catalog 的数字化遗产浏览。
- */
-const librarySearchSources = ["馆藏记录最新模板导入", "海外藏馆 CSV 审核导入"];
-
 const digitalBookWhere = {
   AND: [
     { status: "APPROVED" as const },
-    { OR: [
-      { source: null },
-      { source: { notIn: librarySearchSources } },
-    ] },
+    { isDigitalHeritage: true },
   ],
 };
 
@@ -107,7 +98,7 @@ async function readApprovedCatalogRecords(): Promise<CatalogRecord[]> {
   if (cloudRecords) return cloudRecords;
   const [books, artifacts] = await Promise.all([
     prisma.book.findMany({ where: digitalBookWhere, include: { media: { orderBy: { createdAt: "asc" } } } }),
-    prisma.artifact.findMany({ where: { status: "APPROVED" }, include: { media: { orderBy: { createdAt: "asc" } } } }),
+    prisma.artifact.findMany({ where: { status: "APPROVED", isDigitalHeritage: true }, include: { media: { orderBy: { createdAt: "asc" } } } }),
   ]);
   const bookExtras = await readBookBibliographicMetadata(books.map((book) => book.id));
   const bookRecords = books.map((book) => { const metadata = bookExtras.get(book.id) ?? { eraDetail: null, publicationDate: null, imprintPublisher: null, binding: null, volumeCount: 1, categories: [] }; return toCatalogRecord({ ...book, ...metadata, date: metadata.publicationDate ?? metadata.eraDetail ?? book.dynasty, type: "manuscript", metadata: bookMetadata({ ...book, ...metadata }) }); });
@@ -137,25 +128,21 @@ export async function findCatalogRecords(query: CatalogQuery = {}) {
 
 export async function getCatalogRecord(id: string): Promise<CatalogRecord | null> {
   const cloudRecords = await readCloudCatalogRecords();
-  if (cloudRecords) return cloudRecords.find((record) => record.id === id || record.catalogNumber === id) ?? null;
+  if (cloudRecords) {
+    const record = cloudRecords.find((item) => item.id === id || item.catalogNumber === id) ?? null;
+    return record;
+  }
   const book = await prisma.book.findFirst({ where: { AND: [digitalBookWhere, { OR: [{ id }, { catalogNumber: id }] }] }, include: { media: { orderBy: { createdAt: "asc" } } } });
   if (book) { const metadata = (await readBookBibliographicMetadata([book.id])).get(book.id) ?? { eraDetail: null, publicationDate: null, imprintPublisher: null, binding: null, volumeCount: 1, categories: [] }; return toCatalogRecord({ ...book, ...metadata, date: metadata.publicationDate ?? metadata.eraDetail ?? book.dynasty, type: "manuscript", metadata: bookMetadata({ ...book, ...metadata }) }); }
-  const artifact = await prisma.artifact.findFirst({ where: { status: "APPROVED", OR: [{ id }, { catalogNumber: id }] }, include: { media: { orderBy: { createdAt: "asc" } } } });
-  return artifact ? toCatalogRecord({ ...artifact, date: artifact.era, type: "artifact", metadata: [{ label: "类别", value: artifact.category }, { label: "年代", value: artifact.era }, { label: "材质", value: artifact.material }] }) : null;
+  const artifact = await prisma.artifact.findFirst({ where: { AND: [{ status: "APPROVED" }, { isDigitalHeritage: true }, { OR: [{ id }, { catalogNumber: id }] }] }, include: { media: { orderBy: { createdAt: "asc" } } } });
+  if (!artifact) return null;
+  return toCatalogRecord({ ...artifact, date: artifact.era, type: "artifact", metadata: [{ label: "类别", value: artifact.category }, { label: "年代", value: artifact.era }, { label: "材质", value: artifact.material }] });
 }
 
 export async function getCatalogOverview() {
-  const cloudRecords = await readCloudCatalogRecords();
-  if (cloudRecords) {
-    const manuscripts = cloudRecords.filter((record) => record.type === "manuscript").length;
-    return { total: cloudRecords.length, manuscripts, artifacts: cloudRecords.length - manuscripts };
-  }
-  const [manuscripts, artifacts] = await Promise.all([
-    prisma.book.count({ where: digitalBookWhere }),
-    prisma.artifact.count({ where: { status: "APPROVED" } }),
-  ]);
-  const total = manuscripts + artifacts;
-  return { total, manuscripts, artifacts };
+  const records = await listCatalogRecords();
+  const manuscripts = records.filter((record) => record.type === "manuscript").length;
+  return { total: records.length, manuscripts, artifacts: records.length - manuscripts };
 }
 
 /** Live counts used by the homepage collection summary. */

@@ -205,6 +205,7 @@ model Book {
   categories        String[]          @default([])
   language          String?
   catalogNumber     String?           @unique @map("catalog_number")
+  isDigitalHeritage Boolean           @default(false) @map("is_digital_heritage")
   reviewedByUser    User?             @relation("BookReviewer", fields: [reviewedByUserId], references: [id])
   submittedByUser   User?             @relation("BookSubmitter", fields: [submittedByUserId], references: [id])
   borrowingRecords  BorrowingRecord[]
@@ -234,6 +235,7 @@ model Artifact {
   reviewComment     String?       @map("review_comment")
   reviewedAt        DateTime?     @map("reviewed_at")
   catalogNumber     String?       @unique @map("catalog_number")
+  isDigitalHeritage Boolean      @default(false) @map("is_digital_heritage")
   reviewedByUser    User?         @relation("ArtifactReviewer", fields: [reviewedByUserId], references: [id])
   submittedByUser   User?         @relation("ArtifactSubmitter", fields: [submittedByUserId], references: [id])
   media             MediaAsset[]
